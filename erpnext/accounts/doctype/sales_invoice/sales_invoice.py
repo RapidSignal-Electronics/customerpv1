@@ -142,7 +142,7 @@ class SalesInvoice(SellingController):
 			validate_loyalty_points(self, self.loyalty_points)
 
 	def validate_fixed_asset(self):
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.is_fixed_asset and d.meta.get_field("asset") and d.asset:
 				asset = frappe.get_doc("Asset", d.asset)
 				if self.doctype == "Sales Invoice" and self.docstatus == 1:
@@ -390,7 +390,7 @@ class SalesInvoice(SellingController):
 		if bypass_credit_limit_check_at_sales_order:
 			validate_against_credit_limit = True
 
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if not (d.sales_order or d.delivery_note):
 				validate_against_credit_limit = True
 				break
@@ -531,7 +531,7 @@ class SalesInvoice(SellingController):
 				self.update_stock = cint(pos.get("update_stock"))
 
 			# set pos values in items
-			for item in self.get("items"):
+			for item in get_items_custom(self):
 				if item.get('item_code'):
 					profile_details = get_pos_profile_item_details(pos, frappe._dict(item.as_dict()), pos, update_data=True)
 					for fname, val in iteritems(profile_details):
@@ -680,7 +680,7 @@ class SalesInvoice(SellingController):
 				frappe.throw(_("Warehouse required for stock Item {0}").format(d.item_code))
 
 	def validate_delivery_note(self):
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.delivery_note:
 				msgprint(_("Stock cannot be updated against Delivery Note {0}").format(d.delivery_note), raise_exception=1)
 
@@ -791,7 +791,7 @@ class SalesInvoice(SellingController):
 
 	def set_income_account_for_fixed_assets(self):
 		disposal_account = depreciation_cost_center = None
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.is_fixed_asset:
 				if not disposal_account:
 					disposal_account, depreciation_cost_center = get_disposal_account_and_cost_center(self.company)
@@ -924,7 +924,7 @@ class SalesInvoice(SellingController):
 		# income account gl entries
 		enable_discount_accounting = cint(frappe.db.get_single_value('Accounts Settings', 'enable_discount_accounting'))
 
-		for item in self.get("items"):
+		for item in get_items_custom(self):
 			if flt(item.base_net_amount, item.precision("base_net_amount")):
 				if item.is_fixed_asset:
 					asset = frappe.get_doc("Asset", item.asset)
@@ -1126,7 +1126,7 @@ class SalesInvoice(SellingController):
 
 	def update_billing_status_in_dn(self, update_modified=True):
 		updated_delivery_notes = []
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.dn_detail:
 				billed_amt = frappe.db.sql("""select sum(amount) from `tabSales Invoice Item`
 					where dn_detail=%s and docstatus=1""", d.dn_detail)
@@ -1979,3 +1979,13 @@ def check_if_return_invoice_linked_with_payment_entry(self):
 			message += " " + ", ".join(payment_entries_link) + " "
 			message += _("to unallocate the amount of this Return Invoice before cancelling it.")
 			frappe.throw(message)
+
+def get_items_custom(self):
+		items = []
+		for item in self.get("items"):
+			if item.subitems_reference:
+				subitems_doc = frappe.get_doc("Sales Invoice Subitems Reference", item.subitems_reference)
+				for e in subitems_doc.sub_items:
+					items.append(e)
+			items.append(item)
+		return items

@@ -52,7 +52,7 @@ class StockController(AccountsController):
 
 	def validate_serialized_batch(self):
 		from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if hasattr(d, 'serial_no') and hasattr(d, 'batch_no') and d.serial_no and d.batch_no:
 				serial_nos = frappe.get_all("Serial No",
 					fields=["batch_no", "name", "warehouse"],
@@ -74,7 +74,7 @@ class StockController(AccountsController):
 						.format(d.idx, get_link_to_form("Batch", d.get("batch_no"))))
 
 	def clean_serial_nos(self):
-		for row in self.get("items"):
+		for row in get_items_custom(self):
 			if hasattr(row, "serial_no") and row.serial_no:
 				# replace commas by linefeed and remove all spaces in string
 				row.serial_no = row.serial_no.replace(",", "\n").replace(" ", "")
@@ -203,7 +203,7 @@ class StockController(AccountsController):
 		items, warehouses = [], []
 
 		if hasattr(self, "items"):
-			item_doclist = self.get("items")
+			item_doclist = get_items_custom(self)
 		elif self.doctype == "Stock Reconciliation":
 			item_doclist = []
 			data = json.loads(self.reconciliation_json)
@@ -325,7 +325,7 @@ class StockController(AccountsController):
 
 	def get_serialized_items(self):
 		serialized_items = []
-		item_codes = list(set(d.item_code for d in self.get("items")))
+		item_codes = list(set(d.item_code for d in get_items_custom(self)))
 		if item_codes:
 			serialized_items = frappe.db.sql_list("""select name from `tabItem`
 				where has_serial_no=1 and name in ({})""".format(", ".join(["%s"]*len(item_codes))),
@@ -337,15 +337,15 @@ class StockController(AccountsController):
 		from erpnext.stock.utils import validate_disabled_warehouse, validate_warehouse_company
 
 		warehouses = list(set(d.warehouse for d in
-			self.get("items") if getattr(d, "warehouse", None)))
+			get_items_custom(self) if getattr(d, "warehouse", None)))
 
 		target_warehouses = list(set([d.target_warehouse for d in
-			self.get("items") if getattr(d, "target_warehouse", None)]))
+			get_items_custom(self) if getattr(d, "target_warehouse", None)]))
 
 		warehouses.extend(target_warehouses)
 
 		from_warehouse = list(set([d.from_warehouse for d in
-			self.get("items") if getattr(d, "from_warehouse", None)]))
+			get_items_custom(self) if getattr(d, "from_warehouse", None)]))
 
 		warehouses.extend(from_warehouse)
 
@@ -383,7 +383,7 @@ class StockController(AccountsController):
 			(self.doctype in ["Sales Invoice", "Purchase Invoice"] and not self.update_stock)):
 				return
 
-		for row in self.get('items'):
+		for row in get_items_custom(self):
 			qi_required = False
 			if (inspection_required_fieldname and frappe.db.get_value("Item", row.item_code, inspection_required_fieldname)):
 				qi_required = True
@@ -437,14 +437,14 @@ class StockController(AccountsController):
 			frappe.get_doc("Blanket Order", blanket_order).update_ordered_qty()
 
 	def validate_customer_provided_item(self):
-		for d in self.get('items'):
+		for d in get_items_custom(self):
 			# Customer Provided parts will have zero valuation rate
 			if frappe.db.get_value('Item', d.item_code, 'is_customer_provided_item'):
 				d.allow_zero_valuation_rate = 1
 
 	def set_rate_of_stock_uom(self):
 		if self.doctype in ["Purchase Receipt", "Purchase Invoice", "Purchase Order", "Sales Invoice", "Sales Order", "Delivery Note", "Quotation"]:
-			for d in self.get("items"):
+			for d in get_items_custom(self):
 				d.stock_uom_rate = d.rate / (d.conversion_factor or 1)
 
 	def validate_internal_transfer(self):
@@ -456,12 +456,12 @@ class StockController(AccountsController):
 
 	def validate_in_transit_warehouses(self):
 		if (self.doctype == 'Sales Invoice' and self.get('update_stock')) or self.doctype == 'Delivery Note':
-			for item in self.get('items'):
+			for item in get_items_custom(self):
 				if not item.target_warehouse:
 					frappe.throw(_("Row {0}: Target Warehouse is mandatory for internal transfers").format(item.idx))
 
 		if (self.doctype == 'Purchase Invoice' and self.get('update_stock')) or self.doctype == 'Purchase Receipt':
-			for item in self.get('items'):
+			for item in get_items_custom(self):
 				if not item.from_warehouse:
 					frappe.throw(_("Row {0}: From Warehouse is mandatory for internal transfers").format(item.idx))
 
@@ -485,7 +485,7 @@ class StockController(AccountsController):
 
 		if valid_doctype:
 			rule_map = defaultdict(dict)
-			for item in self.get("items"):
+			for item in get_items_custom(self):
 				warehouse_field = "t_warehouse" if self.doctype == "Stock Entry" else "warehouse"
 				rule = frappe.db.get_value("Putaway Rule",
 					{
@@ -668,3 +668,13 @@ def create_repost_item_valuation_entry(args):
 	repost_entry.flags.ignore_links = True
 	repost_entry.save()
 	repost_entry.submit()
+
+def get_items_custom(self):
+		items = []
+		for item in self.get("items"):
+			if item.subitems_reference:
+				subitems_doc = frappe.get_doc("Sales Invoice Subitems Reference", item.subitems_reference)
+				for e in subitems_doc.sub_items:
+					items.append(e)
+			items.append(item)
+		return items

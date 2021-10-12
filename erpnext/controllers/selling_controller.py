@@ -16,7 +16,6 @@ from erpnext.controllers.stock_controller import StockController
 from erpnext.controllers.sales_and_purchase_return import get_rate_for_return
 
 class SellingController(StockController):
-
 	def get_feed(self):
 		return _("To {0} | {1} {2}").format(self.customer_name, self.currency,
 			self.grand_total)
@@ -24,7 +23,7 @@ class SellingController(StockController):
 	def onload(self):
 		super(SellingController, self).onload()
 		if self.doctype in ("Sales Order", "Delivery Note", "Sales Invoice"):
-			for item in self.get("items"):
+			for item in get_items_custom(self):
 				item.update(get_bin_details(item.item_code, item.warehouse))
 
 	def validate(self):
@@ -153,7 +152,7 @@ class SellingController(StockController):
 			throw(_("Total allocated percentage for sales team should be 100"))
 
 	def validate_max_discount(self):
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.item_code:
 				discount = flt(frappe.get_cached_value("Item", d.item_code, "max_discount"))
 
@@ -161,7 +160,7 @@ class SellingController(StockController):
 					frappe.throw(_("Maximum discount for Item {0} is {1}%").format(d.item_code, discount))
 
 	def set_qty_as_per_stock_uom(self):
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.meta.get_field("stock_qty"):
 				if not d.conversion_factor:
 					frappe.throw(_("Row {0}: Conversion Factor is mandatory").format(d.idx))
@@ -182,7 +181,7 @@ class SellingController(StockController):
 		if hasattr(self, "is_return") and self.is_return:
 			return
 
-		for it in self.get("items"):
+		for it in get_items_custom(self):
 			if not it.item_code:
 				continue
 
@@ -205,10 +204,9 @@ class SellingController(StockController):
 
 	def get_item_list(self):
 		il = []
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.qty is None:
 				frappe.throw(_("Row {0}: Qty is mandatory").format(d.idx))
-
 			if self.has_product_bundle(d.item_code):
 				for p in self.get("packed_items"):
 					if p.parent_detail_docname == d.name and p.parent_item == d.item_code:
@@ -280,7 +278,7 @@ class SellingController(StockController):
 		return so_qty, so_warehouse
 
 	def check_sales_order_on_hold_or_close(self, ref_fieldname):
-		for d in self.get("items"):
+		for d in get_items_custom(self) :
 			if d.get(ref_fieldname):
 				status = frappe.db.get_value("Sales Order", d.get(ref_fieldname), "status")
 				if status in ("Closed", "On Hold"):
@@ -288,7 +286,7 @@ class SellingController(StockController):
 
 	def update_reserved_qty(self):
 		so_map = {}
-		for d in self.get("items"):
+		for d in get_items_custom(self):
 			if d.so_detail:
 				if self.doctype == "Delivery Note" and d.against_sales_order:
 					so_map.setdefault(d.against_sales_order, []).append(d.so_detail)
@@ -308,8 +306,7 @@ class SellingController(StockController):
 	def set_incoming_rate(self):
 		if self.doctype not in ("Delivery Note", "Sales Invoice", "Sales Order"):
 			return
-
-		items = self.get("items") + (self.get("packed_items") or [])
+		items = get_items_custom(self)  + (self.get("packed_items") or [])
 		for d in items:
 			if not self.get("return_against"):
 				# Get incoming rate based on original item cost based on valuation method
@@ -464,7 +461,7 @@ class SellingController(StockController):
 		if self.doctype == "POS Invoice":
 			return
 
-		for d in self.get('items'):
+		for d in get_items_custom(self):
 			if self.doctype == "Sales Invoice":
 				stock_items = [d.item_code, d.description, d.warehouse, d.sales_order or d.delivery_note, d.batch_no or '']
 				non_stock_items = [d.item_code, d.description, d.sales_order or d.delivery_note]
@@ -493,7 +490,7 @@ class SellingController(StockController):
 					chk_dupl_itm.append(non_stock_items)
 
 	def validate_target_warehouse(self):
-		items = self.get("items") + (self.get("packed_items") or [])
+		items = get_items_custom(self) + (self.get("packed_items") or [])
 
 		for d in items:
 			if d.get("target_warehouse") and d.get("warehouse") == d.get("target_warehouse"):
@@ -507,7 +504,17 @@ class SellingController(StockController):
 		validate_item_type(self, "is_sales_item", "sales")
 
 def set_default_income_account_for_item(obj):
-	for d in obj.get("items"):
+	for d in get_items_custom(obj):
+	# for d in obj.get("items"):
 		if d.item_code:
 			if getattr(d, "income_account", None):
 				set_item_default(d.item_code, obj.company, 'income_account', d.income_account)
+def get_items_custom(self):
+		items = []
+		for item in self.get("items"):
+			if item.subitems_reference:
+				subitems_doc = frappe.get_doc("Sales Invoice Subitems Reference", item.subitems_reference)
+				for e in subitems_doc.sub_items:
+					items.append(e)
+			items.append(item)
+		return items
