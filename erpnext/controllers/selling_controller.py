@@ -15,10 +15,6 @@ from erpnext.stock.doctype.item.item import set_item_default
 from erpnext.stock.get_item_details import get_bin_details, get_conversion_factor
 from erpnext.stock.utils import get_incoming_rate
 
-<<<<<<< HEAD
-=======
-
->>>>>>> version-13
 class SellingController(StockController):
 	def get_feed(self):
 		return _("To {0} | {1} {2}").format(self.customer_name, self.currency,
